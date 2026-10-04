@@ -7,7 +7,7 @@ import streamlit as st
 
 # Config Halaman Website
 st.set_page_config(
-    page_title="Revenue Converter & Categorizer", page_icon="📊", layout="wide"
+    page_title="Revenue Converter & Summarizer", page_icon="📊", layout="wide"
 )
 
 
@@ -67,12 +67,11 @@ def parse_and_categorize(text):
 
 
 # ==========================================
-# 2. GENERATE EXCEL WITH SUMMARY & DETAIL SHEET
+# 2. GENERATE EXCEL (SUMMARY & DETAIL SHEET)
 # ==========================================
 def generate_excel(revenue_data, category_totals):
     wb = openpyxl.Workbook()
 
-    # Styling setup
     NAVY, ICE_BLUE, BORDER_GRAY, ZEBRA_FILL = (
         "1B365D",
         "F2F5F9",
@@ -110,9 +109,7 @@ def generate_excel(revenue_data, category_totals):
 
     num_format = '#,##0;(#,##0);"-";@'
 
-    # -------------------------------------------------------------
-    # SHEET 1: SUMMARY PER KATEGORI
-    # -------------------------------------------------------------
+    # SHEET 1: SUMMARY
     ws_summary = wb.active
     ws_summary.title = "Category Summary"
     ws_summary.views.sheetView[0].showGridLines = True
@@ -177,9 +174,7 @@ def generate_excel(revenue_data, category_totals):
     ws_summary.column_dimensions["A"].width = 30
     ws_summary.column_dimensions["B"].width = 25
 
-    # -------------------------------------------------------------
-    # SHEET 2: DETAIL TRANSAKSI
-    # -------------------------------------------------------------
+    # SHEET 2: DETAIL
     ws_detail = wb.create_sheet(title="Transaction Detail")
     ws_detail.views.sheetView[0].showGridLines = True
     ws_detail.freeze_panes = "A5"
@@ -279,7 +274,7 @@ def generate_excel(revenue_data, category_totals):
 # ==========================================
 st.title("📊 Trial Balance Revenue Converter & Summarizer")
 st.write(
-    "Paste data mentah di bawah untuk memproses kategori, menghitung ringkasan per kategori, dan mengunduh Excel."
+    "Paste data mentah di bawah untuk memproses kategori, melihat ringkasan, dan mengunduh laporan Excel."
 )
 
 raw_input = st.text_area("Paste Raw Data di Sini:", height=200)
@@ -293,9 +288,9 @@ if st.button("🚀 Proses & Hitung Ringkasan"):
             f"Berhasil memproses {len(data_detail)} item ke dalam {len(data_summary)} kategori!"
         )
 
-        # Tombol Download Utama
+        # Tombol Download Excel
         st.download_button(
-            label="📥 Download Excel Report (Ringkasan + Detail)",
+            label="📥 Download File Excel (Ringkasan + Detail)",
             data=excel_file,
             file_name="Trial_Balance_Revenue_Report.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -303,7 +298,7 @@ if st.button("🚀 Proses & Hitung Ringkasan"):
 
         st.markdown("---")
 
-        # Visualisasi & Preview Langsung di Web
+        # BARIS 1: RINGKASAN & GRAFIK
         col1, col2 = st.columns([1, 1])
 
         with col1:
@@ -311,16 +306,36 @@ if st.button("🚀 Proses & Hitung Ringkasan"):
             df_summary = pd.DataFrame(
                 list(data_summary.items()), columns=["Kategori", "Total (IDR)"]
             )
-            # Format Angka IDR
             df_summary_formatted = df_summary.copy()
             df_summary_formatted["Total (IDR)"] = df_summary_formatted[
                 "Total (IDR)"
             ].apply(lambda x: f"{x:,.0f}")
-            st.dataframe(df_summary_formatted, use_container_width=True)
+            st.dataframe(
+                df_summary_formatted, use_container_width=True, hide_index=True
+            )
 
         with col2:
             st.subheader("📈 Grafik Kontribusi Kategori")
             st.bar_chart(df_summary.set_index("Kategori"))
+
+        st.markdown("---")
+
+        # BARIS 2: TABEL DETAIL TRANSAKSI
+        st.subheader("📑 Detail Transaksi Lengkap")
+
+        df_detail = pd.DataFrame(
+            data_detail,
+            columns=["Category", "Account Description", "Amount (IDR)"],
+        )
+        df_detail_formatted = df_detail.copy()
+        df_detail_formatted["Amount (IDR)"] = df_detail_formatted[
+            "Amount (IDR)"
+        ].apply(lambda x: f"{x:,.0f}")
+
+        # Tampilan Tabel Detail
+        st.dataframe(
+            df_detail_formatted, use_container_width=True, hide_index=True
+        )
 
     else:
         st.warning("Silakan paste data mentah terlebih dahulu.")

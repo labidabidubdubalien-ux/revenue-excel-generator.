@@ -18,7 +18,7 @@ def get_category(description):
     desc_lower = description.lower()
     if any(
         kw in desc_lower
-        for kw in ["sugar & spice", "loyalty reward adjustment"]
+        for kw in ["sugar & spice", "loyalty reward adjustment", "bf package"]
     ):
         return "Sugar & Spice"
     elif "lobby lounge" in desc_lower:

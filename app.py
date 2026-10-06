@@ -37,8 +37,8 @@ def get_category(description):
         return "Guest Laundry"
     elif any(
         kw in desc_lower
-        for kw in ["accomodation ++", "checkout", "upselling", 
-                   "accomodation nett", "check in", "late checkout nett"]
+        for kw in ["accomodation", "checkout", "upselling", 
+                   "check in"]
     ):
         return "Room Revenue"
     else:

@@ -18,10 +18,10 @@ st.set_page_config(
 def extract_revenue_from_pdf(pdf_file):
     raw_lines = []
 
-    # 1. Ekstrak teks dari seluruh halaman PDF
+    # Ekstrak teks dari seluruh halaman PDF
     with pdfplumber.open(pdf_file) as pdf:
         for page in pdf.pages:
-            text = page.extract_text(layout=False)
+            text = page.extract_text()
             if text:
                 raw_lines.extend(text.split("\n"))
 
@@ -35,10 +35,16 @@ def extract_revenue_from_pdf(pdf_file):
 
         line_lower = line_clean.lower()
 
-        # Deteksi Awal Section Revenue
-        if line_lower == "revenue" or line_lower.startswith("revenue "):
-            is_revenue_section = True
-            continue
+        # Deteksi Awal Section Revenue (Pencarian fleksibel)
+        if (
+            line_lower == "revenue"
+            or line_lower.startswith("revenue ")
+            or line_lower.endswith(" revenue")
+        ):
+            # Pastikan bukan baris total/subtotal
+            if "total" not in line_lower and "non" not in line_lower:
+                is_revenue_section = True
+                continue
 
         # Deteksi Akhir Section Revenue (Stop Parsing)
         if "revenue total" in line_lower or "non revenue" in line_lower:
@@ -47,17 +53,18 @@ def extract_revenue_from_pdf(pdf_file):
 
         # Proses Baris Dalam Section Revenue
         if is_revenue_section:
-            # Bersihkan karakter pemisah seperti '|' yang sering terbaca oleh PDF parser
+            # Hapus karakter '|' dan spasi ganda
             clean_str = line_clean.replace("|", " ").strip()
+            clean_str = re.sub(r"\s+", " ", clean_str)
 
-            # Cari pola nominal angka di akhir baris (misal: 43,745,000 atau - 165,888)
+            # Pola untuk menangkap: [Account Code] [Description] [Amount]
             match_amount = re.search(r"(-?\s*[\d,]+(?:\.\d+)?)$", clean_str)
 
             if match_amount:
                 amount_str = match_amount.group(1)
                 left_text = clean_str[: match_amount.start()].strip()
 
-                # Pisahkan Kode Akun (jika ada angka di paling depan) dan Deskripsi
+                # Cek jika ada Kode Akun (angka di paling awal)
                 match_code = re.match(r"^(\d+)\s+(.*)$", left_text)
                 if match_code:
                     account_code = match_code.group(1)
@@ -66,7 +73,7 @@ def extract_revenue_from_pdf(pdf_file):
                     account_code = ""
                     desc = left_text.strip()
 
-                # Bersihkan format angka ke integer
+                # Parse nominal angka
                 try:
                     num_clean = (
                         amount_str.replace(" ", "").replace(",", "").strip()
@@ -74,7 +81,7 @@ def extract_revenue_from_pdf(pdf_file):
                     if num_clean and num_clean != "-":
                         amount = int(float(num_clean))
 
-                        # Pastikan baris bukan header/label berulang
+                        # Abaikan jika deskripsinya hanya kata "Revenue" atau kosong
                         if desc and desc.lower() != "revenue":
                             revenue_items.append((account_code, desc, amount))
                 except ValueError:

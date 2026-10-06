@@ -3,6 +3,7 @@ import re
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 import pandas as pd
+import pdfplumber
 import streamlit as st
 
 # Config Halaman Website
@@ -12,7 +13,63 @@ st.set_page_config(
 
 
 # ==========================================
-# 1. LOGIKA KATEGORI & PARSER
+# 1. PARSER PDF KHUSUS REVENUE
+# ==========================================
+def extract_revenue_from_pdf(pdf_file):
+    raw_lines = []
+
+    # Buka PDF dan baca setiap halaman
+    with pdfplumber.open(pdf_file) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text()
+            if text:
+                raw_lines.extend(text.split("\n"))
+
+    revenue_items = []
+    is_revenue_section = False
+
+    # RegEx untuk menangkap: [Account Code] [Description] [Amount]
+    line_pattern = re.compile(r"^(\d+)?\s*(.*?)\s*(-?\s*[\d,]+(?:\.\d+)?)$")
+
+    for line in raw_lines:
+        line_clean = line.strip()
+
+        # Deteksi awal section Revenue
+        if line_clean.lower() == "revenue":
+            is_revenue_section = True
+            continue
+
+        # Deteksi akhir section Revenue (Stop Parsing)
+        if (
+            "revenue total" in line_clean.lower()
+            or "non revenue" in line_clean.lower()
+        ):
+            is_revenue_section = False
+            break
+
+        # Proses data jika berada di dalam section Revenue
+        if is_revenue_section and line_clean:
+            match = line_pattern.match(line_clean)
+            if match:
+                account_code = match.group(1) or ""
+                desc = match.group(2).strip()
+                amount_str = (
+                    match.group(3).replace(" ", "").replace(",", "")
+                )
+
+                try:
+                    amount = int(float(amount_str))
+                    # Pastikan bukan baris header berulang
+                    if desc and desc.lower() != "revenue":
+                        revenue_items.append((account_code, desc, amount))
+                except ValueError:
+                    continue
+
+    return revenue_items
+
+
+# ==========================================
+# 2. LOGIKA KATEGORISASI
 # ==========================================
 def get_category(description):
     desc_lower = description.lower()
@@ -32,42 +89,28 @@ def get_category(description):
         return "Guest Laundry"
     elif any(
         kw in desc_lower
-        for kw in ["accomodation", "check-out", "checkout", "upsell"]
+        for kw in ["accomodation", "check-out", "checkout", "upsell", "bf package"]
     ):
         return "Room Revenue"
     else:
         return "Other Revenue"
 
 
-def parse_and_categorize(text):
-    lines = [
-        line.strip()
-        for line in text.strip().split("\n")
-        if line.strip() and line.strip().lower() != "revenue"
-    ]
-    descriptions, amounts = [], []
-    amount_pattern = re.compile(r"^-?\s*[\d,]+$")
-
-    for line in lines:
-        if amount_pattern.match(line):
-            clean_num = line.replace(" ", "").replace(",", "")
-            amounts.append(int(clean_num))
-        else:
-            descriptions.append(line)
-
+def process_categorization(revenue_items):
     categorized_data = []
     category_totals = {}
 
-    for desc, amount in zip(descriptions, amounts):
+    for acc_code, desc, amount in revenue_items:
         cat = get_category(desc)
-        categorized_data.append((cat, desc, amount))
+        # Simpan format detail: (Category, Account Code, Description, Amount)
+        categorized_data.append((cat, acc_code, desc, amount))
         category_totals[cat] = category_totals.get(cat, 0) + amount
 
     return categorized_data, category_totals
 
 
 # ==========================================
-# 2. GENERATE EXCEL (SUMMARY & DETAIL SHEET)
+# 3. GENERATE EXCEL (SUMMARY & DETAIL SHEET)
 # ==========================================
 def generate_excel(revenue_data, category_totals):
     wb = openpyxl.Workbook()
@@ -109,7 +152,9 @@ def generate_excel(revenue_data, category_totals):
 
     num_format = '#,##0;(#,##0);"-";@'
 
+    # -------------------------------------------------------------
     # SHEET 1: SUMMARY
+    # -------------------------------------------------------------
     ws_summary = wb.active
     ws_summary.title = "Category Summary"
     ws_summary.views.sheetView[0].showGridLines = True
@@ -174,20 +219,22 @@ def generate_excel(revenue_data, category_totals):
     ws_summary.column_dimensions["A"].width = 30
     ws_summary.column_dimensions["B"].width = 25
 
+    # -------------------------------------------------------------
     # SHEET 2: DETAIL
+    # -------------------------------------------------------------
     ws_detail = wb.create_sheet(title="Transaction Detail")
     ws_detail.views.sheetView[0].showGridLines = True
     ws_detail.freeze_panes = "A5"
 
-    ws_detail.merge_cells("A1:C1")
+    ws_detail.merge_cells("A1:D1")
     ws_detail["A1"] = "InterContinental Jakarta Pondok Indah"
     ws_detail["A1"].font = font_title
 
-    ws_detail.merge_cells("A2:C2")
+    ws_detail.merge_cells("A2:D2")
     ws_detail["A2"] = "Trial Balance - Categorized Detail Section"
     ws_detail["A2"].font = font_subtitle
 
-    headers = ["Category", "Account Description", "Amount (IDR)"]
+    headers = ["Category", "Account Code", "Account Description", "Amount (IDR)"]
     for col_idx, header in enumerate(headers, 1):
         cell = ws_detail.cell(row=4, column=col_idx, value=header)
         cell.font = font_header
@@ -195,8 +242,8 @@ def generate_excel(revenue_data, category_totals):
         cell.alignment = Alignment(
             horizontal=(
                 "center"
-                if col_idx == 1
-                else ("left" if col_idx == 2 else "right")
+                if col_idx in [1, 2]
+                else ("left" if col_idx == 3 else "right")
             ),
             vertical="center",
         )
@@ -205,17 +252,20 @@ def generate_excel(revenue_data, category_totals):
     ws_detail.row_dimensions[4].height = 25
 
     start_row_det = 5
-    for i, (category, desc, amount) in enumerate(revenue_data):
+    for i, (category, acc_code, desc, amount) in enumerate(revenue_data):
         row_num = start_row_det + i
         cell_cat = ws_detail.cell(row=row_num, column=1, value=category)
-        cell_desc = ws_detail.cell(row=row_num, column=2, value=desc)
-        cell_amount = ws_detail.cell(row=row_num, column=3, value=amount)
+        cell_acc = ws_detail.cell(row=row_num, column=2, value=acc_code)
+        cell_desc = ws_detail.cell(row=row_num, column=3, value=desc)
+        cell_amount = ws_detail.cell(row=row_num, column=4, value=amount)
 
         cell_cat.alignment = Alignment(horizontal="center")
+        cell_acc.alignment = Alignment(horizontal="center")
         cell_desc.alignment = Alignment(horizontal="left")
         cell_amount.alignment = Alignment(horizontal="right")
 
-        cell_cat.font, cell_desc.font, cell_amount.font = (
+        cell_cat.font, cell_acc.font, cell_desc.font, cell_amount.font = (
+            font_regular,
             font_regular,
             font_regular,
             font_regular,
@@ -223,13 +273,15 @@ def generate_excel(revenue_data, category_totals):
         cell_amount.number_format = num_format
 
         if i % 2 == 1:
-            cell_cat.fill, cell_desc.fill, cell_amount.fill = (
+            cell_cat.fill, cell_acc.fill, cell_desc.fill, cell_amount.fill = (
+                fill_zebra,
                 fill_zebra,
                 fill_zebra,
                 fill_zebra,
             )
 
-        cell_cat.border, cell_desc.border, cell_amount.border = (
+        cell_cat.border, cell_acc.border, cell_desc.border, cell_amount.border = (
+            thin_border,
             thin_border,
             thin_border,
             thin_border,
@@ -239,9 +291,12 @@ def generate_excel(revenue_data, category_totals):
     ws_detail.cell(row=total_row_det, column=1, value="").border = (
         double_bottom_border
     )
+    ws_detail.cell(row=total_row_det, column=2, value="").border = (
+        double_bottom_border
+    )
 
     cell_label = ws_detail.cell(
-        row=total_row_det, column=2, value="Revenue Total"
+        row=total_row_det, column=3, value="Revenue Total"
     )
     cell_label.font = font_total
     cell_label.fill = fill_total
@@ -250,8 +305,8 @@ def generate_excel(revenue_data, category_totals):
 
     cell_value = ws_detail.cell(
         row=total_row_det,
-        column=3,
-        value=f"=SUM(C{start_row_det}:C{total_row_det-1})",
+        column=4,
+        value=f"=SUM(D{start_row_det}:D{total_row_det-1})",
     )
     cell_value.font = font_total
     cell_value.fill = fill_total
@@ -260,8 +315,9 @@ def generate_excel(revenue_data, category_totals):
     cell_value.border = double_bottom_border
 
     ws_detail.column_dimensions["A"].width = 20
-    ws_detail.column_dimensions["B"].width = 48
-    ws_detail.column_dimensions["C"].width = 22
+    ws_detail.column_dimensions["B"].width = 15
+    ws_detail.column_dimensions["C"].width = 45
+    ws_detail.column_dimensions["D"].width = 22
 
     buffer = io.BytesIO()
     wb.save(buffer)
@@ -270,72 +326,92 @@ def generate_excel(revenue_data, category_totals):
 
 
 # ==========================================
-# 3. ANTARMUKA WEBSITE (STREAMLIT UI)
+# 4. ANTARMUKA WEBSITE (STREAMLIT UI)
 # ==========================================
-st.title("📊 Trial Balance Revenue Converter & Summarizer")
+st.title("📊 Trial Balance PDF Revenue Converter")
 st.write(
-    "Paste data mentah di bawah untuk memproses kategori, melihat ringkasan, dan mengunduh laporan Excel."
+    "Upload file PDF Trial Balance untuk mengekstrak data Revenue secara otomatis, mengelompokkan kategori, dan mengunduh laporan Excel."
 )
 
-raw_input = st.text_area("Paste Raw Data di Sini:", height=200)
+# UI File Uploader
+uploaded_file = st.file_uploader(
+    "Upload File PDF Trial Balance:", type=["pdf"]
+)
 
-if st.button("🚀 Proses & Hitung Ringkasan"):
-    if raw_input.strip():
-        data_detail, data_summary = parse_and_categorize(raw_input)
-        excel_file = generate_excel(data_detail, data_summary)
+if uploaded_file is not None:
+    if st.button("🚀 Proses PDF & Generate Laporan"):
+        # 1. Ekstrak data khusus section Revenue dari PDF
+        revenue_items = extract_revenue_from_pdf(uploaded_file)
 
-        st.success(
-            f"Berhasil memproses {len(data_detail)} item ke dalam {len(data_summary)} kategori!"
-        )
+        if revenue_items:
+            # 2. Proses Klasifikasi & Subtotal
+            data_detail, data_summary = process_categorization(revenue_items)
 
-        # Tombol Download Excel
-        st.download_button(
-            label="📥 Download File Excel (Ringkasan + Detail)",
-            data=excel_file,
-            file_name="Trial_Balance_Revenue_Report.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+            # 3. Generate File Excel
+            excel_file = generate_excel(data_detail, data_summary)
 
-        st.markdown("---")
-
-        # BARIS 1: RINGKASAN & GRAFIK
-        col1, col2 = st.columns([1, 1])
-
-        with col1:
-            st.subheader("📋 Ringkasan Total per Kategori")
-            df_summary = pd.DataFrame(
-                list(data_summary.items()), columns=["Kategori", "Total (IDR)"]
+            st.success(
+                f"Berhasil mengekstrak {len(data_detail)} item transaksi Revenue ke dalam {len(data_summary)} kategori!"
             )
-            df_summary_formatted = df_summary.copy()
-            df_summary_formatted["Total (IDR)"] = df_summary_formatted[
-                "Total (IDR)"
+
+            # Tombol Download Excel
+            st.download_button(
+                label="📥 Download File Excel (Summary + Detail)",
+                data=excel_file,
+                file_name="Trial_Balance_Revenue_Report.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
+            st.markdown("---")
+
+            # BARIS 1: RINGKASAN & GRAFIK
+            col1, col2 = st.columns([1, 1])
+
+            with col1:
+                st.subheader("📋 Ringkasan Total per Kategori")
+                df_summary = pd.DataFrame(
+                    list(data_summary.items()),
+                    columns=["Kategori", "Total (IDR)"],
+                )
+                df_summary_formatted = df_summary.copy()
+                df_summary_formatted["Total (IDR)"] = df_summary_formatted[
+                    "Total (IDR)"
+                ].apply(lambda x: f"{x:,.0f}")
+                st.dataframe(
+                    df_summary_formatted,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+            with col2:
+                st.subheader("📈 Grafik Kontribusi Kategori")
+                st.bar_chart(df_summary.set_index("Kategori"))
+
+            st.markdown("---")
+
+            # BARIS 2: TABEL DETAIL TRANSAKSI
+            st.subheader("📑 Detail Transaksi Lengkap (Hasil Ekstrak PDF)")
+
+            df_detail = pd.DataFrame(
+                data_detail,
+                columns=[
+                    "Category",
+                    "Account Code",
+                    "Account Description",
+                    "Amount (IDR)",
+                ],
+            )
+            df_detail_formatted = df_detail.copy()
+            df_detail_formatted["Amount (IDR)"] = df_detail_formatted[
+                "Amount (IDR)"
             ].apply(lambda x: f"{x:,.0f}")
+
+            # Tampilan Tabel Detail
             st.dataframe(
-                df_summary_formatted, use_container_width=True, hide_index=True
+                df_detail_formatted, use_container_width=True, hide_index=True
             )
 
-        with col2:
-            st.subheader("📈 Grafik Kontribusi Kategori")
-            st.bar_chart(df_summary.set_index("Kategori"))
-
-        st.markdown("---")
-
-        # BARIS 2: TABEL DETAIL TRANSAKSI
-        st.subheader("📑 Detail Transaksi Lengkap")
-
-        df_detail = pd.DataFrame(
-            data_detail,
-            columns=["Category", "Account Description", "Amount (IDR)"],
-        )
-        df_detail_formatted = df_detail.copy()
-        df_detail_formatted["Amount (IDR)"] = df_detail_formatted[
-            "Amount (IDR)"
-        ].apply(lambda x: f"{x:,.0f}")
-
-        # Tampilan Tabel Detail
-        st.dataframe(
-            df_detail_formatted, use_container_width=True, hide_index=True
-        )
-
-    else:
-        st.warning("Silakan paste data mentah terlebih dahulu.")
+        else:
+            st.error(
+                "Tidak dapat menemukan section 'Revenue' di dalam PDF. Pastikan file PDF sesuai format."
+            )

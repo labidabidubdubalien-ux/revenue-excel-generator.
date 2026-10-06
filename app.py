@@ -17,6 +17,9 @@ st.set_page_config(
 def get_category(description):
     desc_lower = description.lower()
     if "sugar & spice" in desc_lower:
+         kw in desc_lower
+        for kw in ["loyalty reward adjustment"]
+    ):
         return "Sugar & Spice"
     elif "lobby lounge" in desc_lower:
         return "Lobby Lounge"
@@ -26,6 +29,8 @@ def get_category(description):
         return "Minibar"
     elif "banquet" in desc_lower:
         return "Banquet"
+    elif "wedding" in desc_lower:
+        return "Wedding"
     elif "spa" in desc_lower:
         return "Spa"
     elif "laundry" in desc_lower:

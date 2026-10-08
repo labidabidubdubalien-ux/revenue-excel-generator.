@@ -21,6 +21,8 @@ def get_category(description):
         for kw in ["sugar & spice", "loyalty reward adjustment", "bf package"]
     ):
         return "Sugar & Spice"
+    elif "shio" in desc_lower:
+        return "Shio"
     elif "lobby lounge" in desc_lower:
         return "Lobby Lounge"
     elif "room service" in desc_lower:

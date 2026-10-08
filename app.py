@@ -26,7 +26,7 @@ def get_category(description):
     elif "lobby lounge" in desc_lower:
         return "Lobby Lounge"
     elif "room service" in desc_lower:
-        return "Room Service"
+        return "In-Room Dining"
     elif "minibar" in desc_lower:
         return "Minibar"
     elif "banquet" in desc_lower:

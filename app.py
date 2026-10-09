@@ -5,6 +5,8 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 import pandas as pd
 import streamlit as st
 
+from pdf_parser import parse_pdf_revenue
+
 # Config Halaman Website
 st.set_page_config(
     page_title="Revenue Converter & Summarizer", page_icon="📊", layout="wide"
@@ -47,6 +49,15 @@ def get_category(description):
         return "Other Revenue"
 
 
+def categorize(pairs):
+    categorized_data, category_totals = [], {}
+    for desc, amount in pairs:
+        cat = get_category(desc)
+        categorized_data.append((cat, desc, amount))
+        category_totals[cat] = category_totals.get(cat, 0) + amount
+    return categorized_data, category_totals
+
+
 def parse_and_categorize(text):
     lines = [
         line.strip()
@@ -63,15 +74,7 @@ def parse_and_categorize(text):
         else:
             descriptions.append(line)
 
-    categorized_data = []
-    category_totals = {}
-
-    for desc, amount in zip(descriptions, amounts):
-        cat = get_category(desc)
-        categorized_data.append((cat, desc, amount))
-        category_totals[cat] = category_totals.get(cat, 0) + amount
-
-    return categorized_data, category_totals
+    return categorize(zip(descriptions, amounts))
 
 
 # ==========================================
@@ -282,68 +285,86 @@ def generate_excel(revenue_data, category_totals):
 # ==========================================
 st.title("📊 Trial Balance Revenue Converter & Summarizer")
 st.write(
-    "Paste data mentah di bawah untuk memproses kategori, melihat ringkasan, dan mengunduh laporan Excel."
+    "Upload PDF Trial Balance atau paste data mentah untuk memproses kategori, melihat ringkasan, dan mengunduh laporan Excel."
 )
 
-raw_input = st.text_area("Paste Raw Data di Sini:", height=200)
+tab_pdf, tab_text = st.tabs(["📄 Upload PDF", "📋 Paste Teks"])
+result = None
 
-if st.button("🚀 Proses & Hitung Ringkasan"):
-    if raw_input.strip():
-        data_detail, data_summary = parse_and_categorize(raw_input)
-        excel_file = generate_excel(data_detail, data_summary)
+with tab_pdf:
+    uploaded = st.file_uploader("Upload Trial Balance (PDF)", type="pdf")
+    if uploaded and st.button("🚀 Proses PDF"):
+        items, pdf_total = parse_pdf_revenue(uploaded)
+        if not items:
+            st.error("Tidak ada data Revenue yang terbaca dari PDF ini.")
+        else:
+            result = categorize(items)
+            if pdf_total is not None and abs(sum(a for _, a in items) - pdf_total) > 5:
+                st.warning(
+                    "Total hasil baca tidak sama dengan Revenue Total di PDF, cek ulang datanya."
+                )
 
-        st.success(
-            f"Berhasil memproses {len(data_detail)} item ke dalam {len(data_summary)} kategori!"
+with tab_text:
+    raw_input = st.text_area("Paste Raw Data di Sini:", height=200)
+    if st.button("🚀 Proses Teks"):
+        if raw_input.strip():
+            result = parse_and_categorize(raw_input)
+        else:
+            st.warning("Silakan paste data mentah terlebih dahulu.")
+
+if result:
+    data_detail, data_summary = result
+    excel_file = generate_excel(data_detail, data_summary)
+
+    st.success(
+        f"Berhasil memproses {len(data_detail)} item ke dalam {len(data_summary)} kategori!"
+    )
+
+    # Tombol Download Excel
+    st.download_button(
+        label="📥 Download File Excel (Ringkasan + Detail)",
+        data=excel_file,
+        file_name="Trial_Balance_Revenue_Report.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+    st.markdown("---")
+
+    # BARIS 1: RINGKASAN & GRAFIK
+    col1, col2 = st.columns([1, 1])
+
+    with col1:
+        st.subheader("📋 Ringkasan Total per Kategori")
+        df_summary = pd.DataFrame(
+            list(data_summary.items()), columns=["Kategori", "Total (IDR)"]
         )
-
-        # Tombol Download Excel
-        st.download_button(
-            label="📥 Download File Excel (Ringkasan + Detail)",
-            data=excel_file,
-            file_name="Trial_Balance_Revenue_Report.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-
-        st.markdown("---")
-
-        # BARIS 1: RINGKASAN & GRAFIK
-        col1, col2 = st.columns([1, 1])
-
-        with col1:
-            st.subheader("📋 Ringkasan Total per Kategori")
-            df_summary = pd.DataFrame(
-                list(data_summary.items()), columns=["Kategori", "Total (IDR)"]
-            )
-            df_summary_formatted = df_summary.copy()
-            df_summary_formatted["Total (IDR)"] = df_summary_formatted[
-                "Total (IDR)"
-            ].apply(lambda x: f"{x:,.0f}")
-            st.dataframe(
-                df_summary_formatted, use_container_width=True, hide_index=True
-            )
-
-        with col2:
-            st.subheader("📈 Grafik Kontribusi Kategori")
-            st.bar_chart(df_summary.set_index("Kategori"))
-
-        st.markdown("---")
-
-        # BARIS 2: TABEL DETAIL TRANSAKSI
-        st.subheader("📑 Detail Transaksi Lengkap")
-
-        df_detail = pd.DataFrame(
-            data_detail,
-            columns=["Category", "Account Description", "Amount (IDR)"],
-        )
-        df_detail_formatted = df_detail.copy()
-        df_detail_formatted["Amount (IDR)"] = df_detail_formatted[
-            "Amount (IDR)"
+        df_summary_formatted = df_summary.copy()
+        df_summary_formatted["Total (IDR)"] = df_summary_formatted[
+            "Total (IDR)"
         ].apply(lambda x: f"{x:,.0f}")
-
-        # Tampilan Tabel Detail
         st.dataframe(
-            df_detail_formatted, use_container_width=True, hide_index=True
+            df_summary_formatted, use_container_width=True, hide_index=True
         )
 
-    else:
-        st.warning("Silakan paste data mentah terlebih dahulu.")
+    with col2:
+        st.subheader("📈 Grafik Kontribusi Kategori")
+        st.bar_chart(df_summary.set_index("Kategori"))
+
+    st.markdown("---")
+
+    # BARIS 2: TABEL DETAIL TRANSAKSI
+    st.subheader("📑 Detail Transaksi Lengkap")
+
+    df_detail = pd.DataFrame(
+        data_detail,
+        columns=["Category", "Account Description", "Amount (IDR)"],
+    )
+    df_detail_formatted = df_detail.copy()
+    df_detail_formatted["Amount (IDR)"] = df_detail_formatted[
+        "Amount (IDR)"
+    ].apply(lambda x: f"{x:,.0f}")
+
+    # Tampilan Tabel Detail
+    st.dataframe(
+        df_detail_formatted, use_container_width=True, hide_index=True
+    )

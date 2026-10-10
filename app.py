@@ -350,7 +350,7 @@ if result:
         st.subheader("📋 Ringkasan Total per Kategori")
         df_summary = pd.DataFrame(
             list(data_summary.items()), columns=["Kategori", "Total (IDR)"]
-        ).sort_values("Total (IDR)", ascending=False)
+        )
         df_summary_formatted = df_summary.copy()
         df_summary_formatted["Total (IDR)"] = df_summary_formatted[
             "Total (IDR)"
@@ -361,17 +361,7 @@ if result:
 
     with col2:
         st.subheader("📈 Grafik Kontribusi Kategori")
-        df_chart = df_summary.rename(columns={"Total (IDR)": "Total"})
-        chart = (
-            alt.Chart(df_chart)
-            .mark_bar(color="#1B365D")
-            .encode(
-                x=alt.X("Total:Q", title=None, axis=alt.Axis(format=",.0f")),
-                y=alt.Y("Kategori:N", sort="-x", title=None),
-                tooltip=["Kategori", alt.Tooltip("Total:Q", format=",.0f")],
-            )
-        )
-        st.altair_chart(chart, use_container_width=True)
+        st.bar_chart(df_summary.set_index("Kategori"))
 
     st.markdown("---")
 

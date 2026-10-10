@@ -1,5 +1,6 @@
 import io
 import re
+import altair as alt
 import openpyxl
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 import pandas as pd
@@ -330,6 +331,18 @@ if result:
 
     st.markdown("---")
 
+    # KARTU ANGKA RINGKAS
+    grand_total = sum(data_summary.values())
+    top_cat, top_val = max(data_summary.items(), key=lambda kv: kv[1])
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Total Revenue (IDR)", f"{grand_total:,.0f}")
+    m2.metric("Jumlah Item", len(data_detail))
+    m3.metric("Jumlah Kategori", len(data_summary))
+    m4.metric("Kategori Terbesar", top_cat, f"{top_val / grand_total:.1%} dari total", delta_color="off")
+
+    st.markdown("---")
+
     # BARIS 1: RINGKASAN & GRAFIK
     col1, col2 = st.columns([1, 1])
 
@@ -337,7 +350,7 @@ if result:
         st.subheader("📋 Ringkasan Total per Kategori")
         df_summary = pd.DataFrame(
             list(data_summary.items()), columns=["Kategori", "Total (IDR)"]
-        )
+        ).sort_values("Total (IDR)", ascending=False)
         df_summary_formatted = df_summary.copy()
         df_summary_formatted["Total (IDR)"] = df_summary_formatted[
             "Total (IDR)"
@@ -348,7 +361,17 @@ if result:
 
     with col2:
         st.subheader("📈 Grafik Kontribusi Kategori")
-        st.bar_chart(df_summary.set_index("Kategori"))
+        df_chart = df_summary.rename(columns={"Total (IDR)": "Total"})
+        chart = (
+            alt.Chart(df_chart)
+            .mark_bar(color="#1B365D")
+            .encode(
+                x=alt.X("Total:Q", title=None, axis=alt.Axis(format=",.0f")),
+                y=alt.Y("Kategori:N", sort="-x", title=None),
+                tooltip=["Kategori", alt.Tooltip("Total:Q", format=",.0f")],
+            )
+        )
+        st.altair_chart(chart, use_container_width=True)
 
     st.markdown("---")
 

@@ -39,7 +39,7 @@ def get_category(description):
     elif "spa" in desc_lower:
         return "Spa"
     elif "laundry" in desc_lower:
-        return "Guest Laundry"
+        return "Laundry"
     elif any(
         kw in desc_lower
         for kw in ["accomodation", "checkout", "upselling", 
